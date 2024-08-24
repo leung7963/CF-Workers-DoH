@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: 0BSD
 
 // 定义Cloudflare的DNS查询URL
-const doh = 'https://dns.google/dns-query'
-const dohjson = 'https://dns.google/dns-query'
+const doh = 'https://dns.alidns.com/dns-query'
+const dohjson = 'https://dns.alidns.com/resolve'
 
 // 定义Content-Type
 const contype = 'application/dns-message'
