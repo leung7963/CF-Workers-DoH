@@ -9,7 +9,7 @@ const contype = 'application/dns-message'
 const jstontype = 'application/dns-json'
 
 // 设置路径前缀,默认允许所有路径
-const path = ''; // 如果需要指定路径,必须以'/'开头,例如 "/dns-query"
+const path = '/dns-query'; // 如果需要指定路径,必须以'/'开头,例如 "/dns-query"
 
 // 创建一个404响应对象
 const r404 = new Response(null, {status: 404});
