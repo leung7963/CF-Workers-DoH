@@ -1,4 +1,4 @@
-let DoH = "dns.google";
+let DoH = "cloudflare-dns.com";
 const jsonDoH = `https://${DoH}/resolve`;
 const dnsDoH = `https://${DoH}/dns-query`;
 let DoH路径 = 'dns-query';
@@ -39,7 +39,12 @@ export default {
       if (env.TOKEN) {
         const token = url.searchParams.get('token');
         if (token != env.TOKEN) {
-          return new Response(JSON.stringify({ error: "Token不正确" }), {
+          return new Response(JSON.stringify({ 
+            status: "error",
+            message: "Token不正确",
+            code: "AUTH_FAILED",
+            timestamp: new Date().toISOString()
+          }, null, 4), {
             status: 403,
             headers: {
               "content-type": "application/json; charset=UTF-8",
@@ -51,7 +56,12 @@ export default {
 
       const ip = url.searchParams.get('ip') || request.headers.get('CF-Connecting-IP');
       if (!ip) {
-        return new Response(JSON.stringify({ error: "IP参数未提供" }), {
+        return new Response(JSON.stringify({ 
+          status: "error",
+          message: "IP参数未提供",
+          code: "MISSING_PARAMETER",
+          timestamp: new Date().toISOString()
+        }, null, 4), {
           status: 400,
           headers: {
             "content-type": "application/json; charset=UTF-8",
@@ -69,6 +79,9 @@ export default {
         }
 
         const data = await response.json();
+        
+        // 添加时间戳到成功的响应数据中
+        data.timestamp = new Date().toISOString();
 
         // 返回数据给客户端，并添加CORS头
         return new Response(JSON.stringify(data, null, 4), {
@@ -81,9 +94,16 @@ export default {
       } catch (error) {
         console.error("IP查询失败:", error);
         return new Response(JSON.stringify({
-          error: `IP查询失败: ${error.message}`,
-          status: 'error'
-        }), {
+          status: "error",
+          message: `IP查询失败: ${error.message}`,
+          code: "API_REQUEST_FAILED",
+          query: ip,
+          timestamp: new Date().toISOString(),
+          details: {
+            errorType: error.name,
+            stack: error.stack ? error.stack.split('\n')[0] : null
+          }
+        }, null, 4), {
           status: 500,
           headers: {
             "content-type": "application/json; charset=UTF-8",
@@ -453,6 +473,12 @@ async function DOHRequest(request) {
     responseHeaders.set('Access-Control-Allow-Origin', '*');
     responseHeaders.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     responseHeaders.set('Access-Control-Allow-Headers', '*');
+    
+    // 检查是否为JSON格式的DoH请求，确保设置正确的Content-Type
+    if (method === 'GET' && searchParams.has('name')) {
+      // 对于JSON格式的DoH请求，明确设置Content-Type为application/json
+      responseHeaders.set('Content-Type', 'application/json');
+    }
 
     // 返回响应
     return new Response(response.body, {
@@ -779,6 +805,22 @@ async function HTML() {
       display: inline-block;
     }
 
+    .geo-blocked {
+      color: #ffffff;
+      background-color: #dc3545;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      display: inline-block;
+      animation: pulse-red 2s infinite;
+    }
+
+    @keyframes pulse-red {
+      0% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7); }
+      70% { box-shadow: 0 0 0 10px rgba(220, 53, 69, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0); }
+    }
+
     .geo-loading {
       color: rgb(150, 100, 80);
       font-style: italic;
@@ -881,13 +923,17 @@ async function HTML() {
             <select id="dohSelect" class="form-select">
               <option value="current" selected id="currentDohOption">自动 (当前站点)</option>
               <option value="https://dns.alidns.com/resolve">https://dns.alidns.com/resolve (阿里)</option>
-              <option value="https://doh.pub/dns-query">https://doh.pub/dns-query (腾讯)</option>
+              <option value="https://sm2.doh.pub/dns-query">https://sm2.doh.pub/dns-query (腾讯)</option>
               <option value="https://doh.360.cn/resolve">https://doh.360.cn/resolve (360)</option>
               <option value="https://cloudflare-dns.com/dns-query">https://cloudflare-dns.com/dns-query (Cloudflare)</option>
               <option value="https://dns.google/resolve">https://dns.google/resolve (谷歌)</option>
               <option value="https://dns.adguard-dns.com/resolve">https://dns.adguard-dns.com/resolve (AdGuard)</option>
               <option value="https://dns.sb/dns-query">https://dns.sb/dns-query (DNS.SB)</option>
-              <option value="https://dns.twnic.tw/dns-query">https://dns.twnic.tw/dns-query (Quad101 TWNIC)</option>
+              <option value="https://zero.dns0.eu/">https://zero.dns0.eu (dns0.eu)</option>
+              <option value="https://dns.nextdns.io">	https://dns.nextdns.io (NextDNS)</option>
+              <option value="https://dns.rabbitdns.org/dns-query">https://dns.rabbitdns.org/dns-query (Rabbit DNS)</option>
+              <option value="https://basic.rethinkdns.com/">https://basic.rethinkdns.com (RethinkDNS)</option>
+              <option value="https://v.recipes/dns-query">https://v.recipes/dns-query (v.recipes DNS)</option>
               <option value="custom">自定义...</option>
             </select>
           </div>
@@ -903,8 +949,9 @@ async function HTML() {
               <button type="button" class="btn btn-outline-secondary" id="clearBtn">清除</button>
             </div>
           </div>
-          <div class="d-grid">
-            <button type="submit" class="btn btn-primary">解析</button>
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary flex-grow-1">解析</button>
+            <button type="button" class="btn btn-outline-primary" id="getJsonBtn">Get Json</button>
           </div>
         </form>
       </div>
@@ -985,6 +1032,29 @@ async function HTML() {
 
     // 记录当前使用的 DoH 地址
     let activeDohUrl = currentDohUrl;
+
+    // 阻断IP列表
+    const 阻断IPv4 = [
+      '104.21.16.1',
+      '104.21.32.1',
+      '104.21.48.1',
+      '104.21.64.1',
+      '104.21.80.1',
+      '104.21.96.1',
+      '104.21.112.1'
+    ];
+
+    const 阻断IPv6 = [
+      '2606:4700:3030::6815:1001',
+      '2606:4700:3030::6815:3001',
+      '2606:4700:3030::6815:7001',
+      '2606:4700:3030::6815:5001'
+    ];
+
+    // 检查IP是否在阻断列表中
+    function isBlockedIP(ip) {
+      return 阻断IPv4.includes(ip) || 阻断IPv6.includes(ip);
+    }
 
     // 显示当前正在使用的 DoH 服务
     function updateActiveDohDisplay() {
@@ -1121,29 +1191,62 @@ async function HTML() {
                 
                 // 添加地理位置信息
                 const geoInfoSpan = recordDiv.querySelector('.geo-info');
-                // 异步查询 IP 地理位置信息
-                queryIpGeoInfo(record.data).then(geoData => {
-                  if (geoData && geoData.status === 'success') {
-                    // 更新为实际的地理位置信息
+                
+                // 检查是否为阻断IP
+                if (isBlockedIP(record.data)) {
+                  // 异步查询 IP 地理位置信息获取AS信息
+                  queryIpGeoInfo(record.data).then(geoData => {
                     geoInfoSpan.innerHTML = '';
                     geoInfoSpan.classList.remove('geo-loading');
                     
-                    // 添加国家信息
-                    const countrySpan = document.createElement('span');
-                    countrySpan.className = 'geo-country';
-                    countrySpan.textContent = geoData.country || '未知国家';
-                    geoInfoSpan.appendChild(countrySpan);
+                    // 显示阻断IP标识（替代国家信息）
+                    const blockedSpan = document.createElement('span');
+                    blockedSpan.className = 'geo-blocked';
+                    blockedSpan.textContent = '阻断IP';
+                    geoInfoSpan.appendChild(blockedSpan);
                     
-                    // 添加 AS 信息
-                    const asSpan = document.createElement('span');
-                    asSpan.className = 'geo-as';
-                    asSpan.textContent = geoData.as || '未知 AS';
-                    geoInfoSpan.appendChild(asSpan);
-                  } else {
-                    // 查询失败或无结果
-                    geoInfoSpan.textContent = '位置信息获取失败';
-                  }
-                });
+                    // 如果有AS信息，正常显示
+                    if (geoData && geoData.status === 'success' && geoData.as) {
+                      const asSpan = document.createElement('span');
+                      asSpan.className = 'geo-as';
+                      asSpan.textContent = geoData.as;
+                      geoInfoSpan.appendChild(asSpan);
+                    }
+                  }).catch(() => {
+                    // 查询失败时仍显示阻断IP标识
+                    geoInfoSpan.innerHTML = '';
+                    geoInfoSpan.classList.remove('geo-loading');
+                    
+                    const blockedSpan = document.createElement('span');
+                    blockedSpan.className = 'geo-blocked';
+                    blockedSpan.textContent = '阻断IP';
+                    geoInfoSpan.appendChild(blockedSpan);
+                  });
+                } else {
+                  // 异步查询 IP 地理位置信息
+                  queryIpGeoInfo(record.data).then(geoData => {
+                    if (geoData && geoData.status === 'success') {
+                      // 更新为实际的地理位置信息
+                      geoInfoSpan.innerHTML = '';
+                      geoInfoSpan.classList.remove('geo-loading');
+                      
+                      // 添加国家信息
+                      const countrySpan = document.createElement('span');
+                      countrySpan.className = 'geo-country';
+                      countrySpan.textContent = geoData.country || '未知国家';
+                      geoInfoSpan.appendChild(countrySpan);
+                      
+                      // 添加 AS 信息
+                      const asSpan = document.createElement('span');
+                      asSpan.className = 'geo-as';
+                      asSpan.textContent = geoData.as || '未知 AS';
+                      geoInfoSpan.appendChild(asSpan);
+                    } else {
+                      // 查询失败或无结果
+                      geoInfoSpan.textContent = '位置信息获取失败';
+                    }
+                  });
+                }
               }
             });
           }
@@ -1196,29 +1299,62 @@ async function HTML() {
                 
                 // 添加地理位置信息
                 const geoInfoSpan = recordDiv.querySelector('.geo-info');
-                // 异步查询 IP 地理位置信息
-                queryIpGeoInfo(record.data).then(geoData => {
-                  if (geoData && geoData.status === 'success') {
-                    // 更新为实际的地理位置信息
+                
+                // 检查是否为阻断IP
+                if (isBlockedIP(record.data)) {
+                  // 异步查询 IP 地理位置信息获取AS信息
+                  queryIpGeoInfo(record.data).then(geoData => {
                     geoInfoSpan.innerHTML = '';
                     geoInfoSpan.classList.remove('geo-loading');
                     
-                    // 添加国家信息
-                    const countrySpan = document.createElement('span');
-                    countrySpan.className = 'geo-country';
-                    countrySpan.textContent = geoData.country || '未知国家';
-                    geoInfoSpan.appendChild(countrySpan);
+                    // 显示阻断IP标识（替代国家信息）
+                    const blockedSpan = document.createElement('span');
+                    blockedSpan.className = 'geo-blocked';
+                    blockedSpan.textContent = '阻断IP';
+                    geoInfoSpan.appendChild(blockedSpan);
                     
-                    // 添加 AS 信息
-                    const asSpan = document.createElement('span');
-                    asSpan.className = 'geo-as';
-                    asSpan.textContent = geoData.as || '未知 AS';
-                    geoInfoSpan.appendChild(asSpan);
-                  } else {
-                    // 查询失败或无结果
-                    geoInfoSpan.textContent = '位置信息获取失败';
-                  }
-                });
+                    // 如果有AS信息，正常显示
+                    if (geoData && geoData.status === 'success' && geoData.as) {
+                      const asSpan = document.createElement('span');
+                      asSpan.className = 'geo-as';
+                      asSpan.textContent = geoData.as;
+                      geoInfoSpan.appendChild(asSpan);
+                    }
+                  }).catch(() => {
+                    // 查询失败时仍显示阻断IP标识
+                    geoInfoSpan.innerHTML = '';
+                    geoInfoSpan.classList.remove('geo-loading');
+                    
+                    const blockedSpan = document.createElement('span');
+                    blockedSpan.className = 'geo-blocked';
+                    blockedSpan.textContent = '阻断IP';
+                    geoInfoSpan.appendChild(blockedSpan);
+                  });
+                } else {
+                  // 异步查询 IP 地理位置信息
+                  queryIpGeoInfo(record.data).then(geoData => {
+                    if (geoData && geoData.status === 'success') {
+                      // 更新为实际的地理位置信息
+                      geoInfoSpan.innerHTML = '';
+                      geoInfoSpan.classList.remove('geo-loading');
+                      
+                      // 添加国家信息
+                      const countrySpan = document.createElement('span');
+                      countrySpan.className = 'geo-country';
+                      countrySpan.textContent = geoData.country || '未知国家';
+                      geoInfoSpan.appendChild(countrySpan);
+                      
+                      // 添加 AS 信息
+                      const asSpan = document.createElement('span');
+                      asSpan.className = 'geo-as';
+                      asSpan.textContent = geoData.as || '未知 AS';
+                      geoInfoSpan.appendChild(asSpan);
+                    } else {
+                      // 查询失败或无结果
+                      geoInfoSpan.textContent = '位置信息获取失败';
+                    }
+                  });
+                }
               }
             });
           }
@@ -1416,6 +1552,40 @@ async function HTML() {
               });
             });
           }
+
+          // 添加Get Json按钮的点击事件
+          document.getElementById('getJsonBtn').addEventListener('click', function() {
+            const dohSelect = document.getElementById('dohSelect').value;
+            let dohUrl;
+            
+            // 获取当前选择的DoH服务器URL
+            if(dohSelect === 'current') {
+              dohUrl = currentDohUrl;
+            } else if(dohSelect === 'custom') {
+              dohUrl = document.getElementById('customDoh').value;
+              if (!dohUrl) {
+                alert('请输入自定义 DoH 地址');
+                return;
+              }
+            } else {
+              dohUrl = dohSelect;
+            }
+            
+            // 获取域名
+            const domain = document.getElementById('domain').value;
+            if (!domain) {
+              alert('请输入需要解析的域名');
+              return;
+            }
+            
+            // 构建完整的查询URL
+            let jsonUrl = new URL(dohUrl);
+            // 使用name参数(标准DNS-JSON格式)
+            jsonUrl.searchParams.set('name', domain);
+            
+            // 在新标签页打开
+            window.open(jsonUrl.toString(), '_blank');
+          });
         });
   </script>
 </body>
