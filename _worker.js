@@ -1,4 +1,4 @@
-let DoH = "dns.adguard-dns.com";
+let DoH = "dns.google";
 const jsonDoH = `https://${DoH}/resolve`;
 const dnsDoH = `https://${DoH}/dns-query`;
 let DoH路径 = 'dns-query';
